@@ -1,0 +1,37 @@
+threading = sequential 
+FC=ifort
+
+
+!IF ("$(threading)"=="sequential")
+THREADING_LIB=mkl_sequential.lib
+OMP_LIB =
+!ELSE
+THREADING_LIB=mkl_intel_thread.lib
+OMP_LIB = libiomp5md.lib
+!ENDIF
+
+
+exe:
+         set lib=$(MKLROOT)\lib\ia32;$(MKLROOT)\..\compiler\lib\ia32;%%lib%%
+         set path=$(MKLROOT)\..\redist\ia32\mkl;$(MKLROOT)\..\redist\ia32\compiler;%%path%%
+         set include=$(MKLROOT)\include\ia32;$(MKLROOT)\include\fftw;%%include%%
+         nmake PhononUnfolding.exe 
+
+clear:
+  del *.bak
+  del *.obj
+  del *.mod
+	
+clean:
+  del PhononUnfolding.exe 
+  del *.bak
+  del *.obj
+  del phononunfoldingmodule.mod
+PhononUnfoldingModule.obj : PhononUnfoldingModule.f90
+         $(FC) -c  PhononUnfoldingModule.f90
+         
+PhononUnfolding.obj : PhononUnfolding.f90  PhononUnfoldingModule.obj
+         $(FC) -c  PhononUnfolding.f90
+
+PhononUnfolding.exe : PhononUnfolding.obj  PhononUnfoldingModule.obj
+         $(FC)  PhononUnfolding.obj  PhononUnfoldingModule.obj mkl_blas95.lib mkl_lapack95.lib  mkl_intel_c.lib  mkl_core.lib  $(THREADING_LIB) $(OMP_LIB) 
