@@ -1,0 +1,25 @@
+FC=ifort
+
+MKL= $(MKLROOT)/lib/intel64
+MKL_LIBS= $(MKL)/libmkl_lapack95_lp64.a $(MKL)/libmkl_intel_lp64.a  -Wl,--start-group  $(MKL)/libmkl_sequential.a  $(MKL)/libmkl_core.a  -Wl,--end-group 
+
+MODPATH=-I$(MKLROOT)/include/intel64 -w
+
+exe:
+	export LD_LIBRARY_PATH=$(MKL):$(LD_LIBRARY_PATH);
+	$(MAKE) PhononUnfolding.exe   
+clean:
+	rm -f *.o *.exe *.mod
+clear:
+	rm -f *.o *.mod
+#-------------------------------------------------------------------------------
+PhononUnfoldingModule.o : PhononUnfoldingModule.f90 
+	$(FC) -c  PhononUnfoldingModule.f90  $(MODPATH)     
+
+PhononUnfolding.o : PhononUnfolding.f90 
+	$(FC) -c  PhononUnfolding.f90       
+
+PhononUnfolding.exe:  PhononUnfoldingModule.o PhononUnfolding.o 
+	$(FC)  PhononUnfoldingModule.o PhononUnfolding.o   $(MKL_LIBS)  -o  PhononUnfolding.exe 
+	
+#-------------------------------------------------------------------------------
