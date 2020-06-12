@@ -40,6 +40,16 @@ implicit none
         integer :: n_s             ! number of segments
         real(kind=8), allocatable :: boundary_s(:)   ! segments boundary, dimension: n_s
     end type pebu 
+    
+    type list ! for primitive cell and supercell atom correspondence 
+        integer :: N1, N2
+        integer, allocatable :: f(:) ! number for each row 
+        integer, allocatable :: n(:,:)
+    end type list
+
+
+      
+
 
 
 
@@ -748,6 +758,197 @@ endif
 endsubroutine read_super_cell_atom_positions
 
 
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!  subroutine: read super cell from input file
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+subroutine read_atom_correspondence(file,out)
+character(len=*) :: file
+type(list) :: out
+integer ::N, k1, k2, status_file, status_read, status_k1, status_k2
+integer :: i,j, flag, n_t
+character(len=readline_length) temp
+
+open(1,file=trim(file),status='old',action='read',iostat=status_file)
+flag=0
+status_k1=0
+status_k2=0
+k1=0
+k2=0
+if(status_file==0) then
+    readloop: do
+        flag=flag+1
+        read(1,'(a)',iostat=status_read) temp
+        if(status_read /=0) exit
+        temp=trim(lower_case(temp))
+        i=index(temp,'#')
+        if(i/=0)temp=temp(1:i-1)
+        i=index(temp,'!')
+        if(i/=0)temp=temp(1:i-1)
+        temp=delete_space(temp)
+        i=index(temp,'beginatomcorrespondense')
+        if(i/=0) then
+            k1=flag
+            status_k1=status_k1+1
+        endif
+        i=index(temp,'endatomcorrespondense')
+        if(i/=0) then
+            k2=flag
+            status_k2=status_k2+1
+        endif
+    end do readloop
+else
+    open(2,file='check',access='append')
+    write(2,*)'err in opening file '//trim(file)
+    close(2)
+endif
+k1=k1+1
+k2=k2-1
+N=(k2-k1+1)
+close(1)
+
+out%N1=N; out%N2=1
+allocate(out%f(out%N1))
+!allocate(out%r_2d(out%N1,out%N2))
+if(status_k1.eq.1 .and. status_k2.eq.1) then
+    open(1,file=trim(file),status='old',action='read',iostat=status_file)
+    if(status_file==0) then
+        do i=1,k1-1
+            read(1,*)
+        enddo
+        do i=1, out%N1
+            read(1,'(a)') temp
+            temp=adjustl(temp)
+            n_t=len(trim(temp))
+            if(n_t.lt.2) then
+               out%f(i)=1
+            else
+               flag=1
+               do j=2,n_t
+                  if ( temp(j-1:j-1).eq.' '.and. temp(j:j).ne.' ') flag=flag+1
+               enddo
+               out%f(i)=flag
+            endif
+            if(out%f(i).gt.out%N2) out%N2=out%f(i)
+           ! write(*,*)out%f(i), out%N2
+        enddo
+    else
+        open(2,file='check',access='append')
+        write(2,*)'err in opening file '//trim(file)
+        close(2)
+    endif
+    close(1)
+    
+    allocate(out%n(out%N1,out%N2))    
+   
+    open(1,file=trim(file),status='old',action='read',iostat=status_file)
+    if(status_file==0) then
+        do i=1,k1-1
+            read(1,*)
+        enddo
+        do i=1, out%N1
+            read(1,'(a)') temp
+            temp=adjustl(temp)
+            read(temp,*) out%n(i,1:out%f(i))
+           ! write(*,*)out%n(i,1:out%f(i))
+        enddo
+    else
+        open(2,file='check',access='append')
+        write(2,*)'err in opening file '//trim(file)
+        close(2)
+    endif
+    close(1)
+
+else
+    open(2,file='check',access='append')
+    write(2,*)'there is no (or more than 1 ) begin atom correspondence &
+               or end atom correspondence, or their positions are wrong'
+    close(2)
+endif
+
+
+endsubroutine read_atom_correspondence
+
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!  subroutine: read modes from phonopy file
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+subroutine read_modes_phonopy(e,file)
+implicit none
+character(len=*) :: file
+character(len=500) :: temp
+integer :: status_file, status_read, status_k1, status_k2
+type(pebu) :: e
+real(kind=8) :: t1, t2
+integer :: i, j, k, i_t, j_t
+
+e%n_k=q_points_number('input.dat')
+e%n_atom_sc=atom_number_sc('input.dat')
+e%n_b=e%n_atom_sc*3
+allocate(e%e(e%n_k,e%n_b,2),e%c(e%n_k,e%n_b,e%n_atom_sc,3))
+if(.not.allocated(e%k_s)) allocate(e%k_s(e%n_k,3))
+if(.not.allocated(e%klength))allocate(e%klength(e%n_k))
+
+
+open(1,file=trim(file),status='old',action='read',iostat=status_file)
+
+
+write(*,*)'n_atom=', e%n_atom_sc
+
+do i=1,6; read(1,*) ;enddo
+
+do i=1, e%n_k
+   read(1,*)
+   read(1,'(a)')temp
+   i_t=index(temp,'['); j_t=index(temp,']')
+   temp= temp(i_t+1:j_t-1)   
+   read(temp,*)e%k_s(i,:)
+   write(*,*) 'i=',i, 'k=',e%k_s(i,:)
+   read(1,*)
+   do j=1, e%n_b
+     ! write(*,*) 'test',j
+      read(1,'(a)') temp
+      !write(*,*)trim(temp)
+      read(1,'(a)') temp
+      !write(*,*)trim(temp)
+      i_t=index(temp,':')
+      temp=temp(i_t+1:)
+      read(temp,*) e%e(i,j,1)
+     ! write(*,*) 'j=',j, 'e=',e%e(i,j,1)
+      read(1,*)
+      do k=1, e%n_atom_sc
+        !write(*,*) 'k=',k
+        read(1,*)
+        read(1,'(a)') temp
+        i_t=index(temp,'['); j_t=index(temp,']')
+        temp= temp(i_t+1:j_t-1)
+        read(temp,*) t1,t2
+        e%c(i,j,k,1)=cmplx(t1,t2)
+
+        read(1,'(a)') temp
+        i_t=index(temp,'['); j_t=index(temp,']')
+        temp= temp(i_t+1:j_t-1)
+        read(temp,*) t1,t2
+        e%c(i,j,k,2)=cmplx(t1,t2)
+
+        read(1,'(a)') temp
+        i_t=index(temp,'['); j_t=index(temp,']')
+        temp= temp(i_t+1:j_t-1)
+        !write(*,*)trim(temp)
+        read(temp,*) t1,t2
+        e%c(i,j,k,3)=cmplx(t1,t2)
+
+      enddo
+   enddo
+enddo
+
+endsubroutine read_modes_phonopy
+
+
+
+
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!  subroutine: read modes from file
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -797,6 +998,135 @@ do i=1,e%n_k
 enddo
 
 endsubroutine read_modes
+
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!  subroutine: read modes from file
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+subroutine read_modes_abinitgamma(e,file)
+implicit none
+character(len=*) :: file
+character(len=500) :: temp
+integer :: status_file, status_read, status_k1, status_k2
+type(pebu) :: e
+real(kind=8) :: t1, t2, t3, t4, t5, t6  
+complex(kind=8) :: a(3)
+integer :: i, j, k
+
+e%n_k=1
+e%n_atom_sc=24
+e%n_b=e%n_atom_sc*3
+allocate(e%e(e%n_k,e%n_b,2),e%c(e%n_k,e%n_b,e%n_atom_sc,3))
+if(.not.allocated(e%k_s)) allocate(e%k_s(e%n_k,3))
+if(.not.allocated(e%klength))allocate(e%klength(e%n_k))
+
+
+open(1,file=trim(file),status='old',action='read',iostat=status_file)
+ do i=1,11
+   read(1,*)
+ enddo
+    i=1
+
+   do j=1, e%n_b    
+      !write(*,*)'k=',i, 'band=',j
+      read(1,*)
+      read(1,'(a)')temp
+      read(temp(16:30),*)e%e(i,j,1)
+      !write(*,*)j,e%e(i,j,1)
+      read(1,*)
+      do k=1,e%n_atom_sc
+          read(1,*)
+          read(1,'(a)')temp
+          read(temp(11:47),*)t1, t2 
+          !write(*,*)t1
+          e%c(i,j,k,1)=dcmplx(t1,t2)
+          !write(*,*)e%c(i,j,k,1)
+          read(1,'(a)')temp
+          read(temp(11:47),*)t1, t2
+          e%c(i,j,k,2)=dcmplx(t1,t2)
+         ! write(*,*)e%c(i,j,k,2)
+          read(1,'(a)')temp
+          read(temp(11:47),*)t1, t2
+          e%c(i,j,k,3)=dcmplx(t1,t2)
+         ! write(*,*)e%c(i,j,k,3)
+         ! read(*,*)
+      enddo
+   enddo
+
+
+
+endsubroutine read_modes_abinitgamma
+
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!  subroutine: read modes from file
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+subroutine read_modes_abinit(e,file)
+implicit none
+character(len=*) :: file
+character(len=500) :: temp
+integer :: status_file, status_read, status_k1, status_k2
+type(pebu) :: e
+real(kind=8) :: t1, t2, t3, t4, t5, t6  
+complex(kind=8) :: a(3)
+integer :: i, j, k
+
+e%n_k=q_points_number('input.dat')
+e%n_atom_sc=atom_number_sc('input.dat')
+e%n_b=e%n_atom_sc*3
+
+allocate(e%e(e%n_k,e%n_b,2),e%c(e%n_k,e%n_b,e%n_atom_sc,3))
+if(.not.allocated(e%k_s)) allocate(e%k_s(e%n_k,3))
+if(.not.allocated(e%klength))allocate(e%klength(e%n_k))
+
+
+open(1,file=trim(file),status='old',action='read',iostat=status_file)
+ do i=1,6
+   read(1,*)
+ enddo
+    
+do i=1,e%n_k 
+   read(1,*) 
+   read(1,'(a)') temp
+   read(temp(17:57),*) e%k_s(i,:)
+   !write(*,*) e%k_s(i,:)
+   read(1,*)
+   !pause
+   
+   do j=1, e%n_b    
+      !write(*,*)'k=',i, 'band=',j
+      read(1,*)
+      read(1,'(a)')temp
+      read(temp(16:30),*)e%e(i,j,1)
+      !write(*,*)j,e%e(i,j,1)
+      read(1,*)
+      do k=1,e%n_atom_sc
+          read(1,*)
+          read(1,'(a)')temp
+          read(temp(11:47),*)t1, t2 
+          !write(*,*)t1
+          e%c(i,j,k,1)=dcmplx(t1,t2)
+          !write(*,*)e%c(i,j,k,1)
+          read(1,'(a)')temp
+          read(temp(11:47),*)t1, t2
+          e%c(i,j,k,2)=dcmplx(t1,t2)
+         ! write(*,*)e%c(i,j,k,2)
+          read(1,'(a)')temp
+          read(temp(11:47),*)t1, t2
+          e%c(i,j,k,3)=dcmplx(t1,t2)
+         ! write(*,*)e%c(i,j,k,3)
+         ! read(*,*)
+      enddo
+   enddo
+enddo
+
+
+
+endsubroutine read_modes_abinit
+
+
 
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -873,6 +1203,8 @@ allocate(phase(e%n_atom_sc),phase_temp(e%n_atom_sc))
      max_nx=read_integer('input.dat','max_qx', 2)
      max_ny=read_integer('input.dat','max_qy', 2)
      max_nz=read_integer('input.dat','max_qz', 2)
+     !write(*,*) 'max_nx=', max_nx
+     !read(*,*)
 
      ! read the primary cell lattice parameters
      call read_primary_cell('input.dat',cell1_read)
@@ -995,8 +1327,8 @@ do i_k=1, e%n_k
      enddo 
      ! pause
      t_r=0d0;  t1_r=0d0
-     !do i=-max_nx, max_nx; do j=-max_ny, max_ny; do k=-max_nz, max_nz
-      do i=-1, 1; do j=-1, 1; do k=0, 0
+     do i=-max_nx, max_nx; do j=-max_ny, max_ny; do k=-max_nz, max_nz
+     ! do i=-1, 1; do j=-1, 1; do k=0, 0
          
          ! write(*,*) t_pc(1,:)
          ! write(*,*) t_pc(2,:)
@@ -1055,7 +1387,7 @@ do i_k=1, e%n_k
         !pause
      enddo;enddo;enddo
 
-       ! write(*,'(2I5,f20.5)')i_k, i_b, t_r/(t_r+t1_r)
+        write(*,'(2I5,f20.5)')i_k, i_b, t_r/(t_r+t1_r)
     ! pause
 
      e%e(i_k,i_b,2)=t_r/(t_r+t1_r)
@@ -1076,6 +1408,499 @@ enddo
 close(2)
 
 endsubroutine Unfold_Phonon_planewave
+
+
+
+
+
+
+
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!  subroutine: Unfolding phonon dispersion
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+subroutine Unfold_Phonon_planewave_abinitgamma(e)
+implicit none
+type(pebu) :: e
+type(array_car) cell1_read, cell2_read, r_atoms
+integer :: i, j, k, L, ii, jj, kk, iii, jjj, kkk
+real(kind=8) :: ikx, iky, ikz, wtclean
+integer :: i_k, i_b, i_a
+complex(kind=8) ::  t1_c, t_c
+real(kind=8) :: t(3,3), q(3), t_sc(3,3), t_pc(3,3),tt_pc(3,3), t_group(3),t_ipc_unit_isc(3,3)
+real(kind=8),allocatable :: q_group(:,:), t_new(:,:), t1_new(:,:)
+integer :: n1, n2, n3, n_qgroup, n_flag, max_nx=2, max_ny=2, max_nz=2
+real(kind=8):: t_r, t1_r
+complex(kind=8), allocatable :: phase(:), phase_temp(:)
+integer :: ipiv(3)
+! read atom position
+if(.not.allocated(e%r_atom_sc)) allocate(e%r_atom_sc(e%n_atom_sc,3),e%r_direct_atom_sc(e%n_atom_sc,3))
+allocate(phase(e%n_atom_sc),phase_temp(e%n_atom_sc))
+
+     max_nx=read_integer('input.dat','max_qx', 2)
+     max_ny=read_integer('input.dat','max_qy', 2)
+     max_nz=read_integer('input.dat','max_qz', 2)
+
+     ! read the primary cell lattice parameters
+     call read_primary_cell('input.dat',cell1_read)
+     e%p_lat(1,:)=cell1_read%r_2d(1,:)
+     e%p_lat(2,:)=cell1_read%r_2d(2,:)
+     e%p_lat(3,:)=cell1_read%r_2d(3,:)
+!     write(*,*)e%p_lat(1,:)
+!     write(*,*)e%p_lat(2,:)
+!     write(*,*)e%p_lat(3,:)
+
+     ! read the super cell lattice parameters
+     call read_super_cell('input.dat',cell2_read)
+     e%s_lat(1,:)=cell2_read%r_2d(1,:)
+     e%s_lat(2,:)=cell2_read%r_2d(2,:)
+     e%s_lat(3,:)=cell2_read%r_2d(3,:)
+!     write(*,*)e%s_lat(1,:)
+!     write(*,*)e%s_lat(2,:)
+!     write(*,*)e%s_lat(3,:)
+!     read(*,*)
+     allocate(t_new(3,3))
+     t_new=dble(e%s_lat)     !  prepare inverse matrix
+     !call getrf(t,ipiv)  ! prepare inverse matrix
+     call lu_d(t_new,t1_new)
+     t_r=t1_new(1,1)*t1_new(2,2)*t1_new(3,3) ! det(e%s_lat)
+     !call getri(t,ipiv)  ! inverse matrix
+     call inv_d(t_new,t_new)
+     t_sc=t_new  ! inverse super cell
+     t_new=dble(e%p_lat)     !  prepare inverse matrix
+     !call getrf(t,ipiv)  ! prepare inverse matrix
+     call lu_d(t_new,t1_new) 
+     t_r=abs(t_r/(t1_new(1,1)*t1_new(2,2)*t1_new(3,3))) ! det(e%s_lat)/det(e%p_lat)
+     !call getri(t,ipiv)  ! inverse matrix
+     call inv_d(t_new,t_new)
+     t_pc=t_new  ! inverse primary cell
+     n_qgroup=anint(t_r) ! number of q points in the primary cell Brillouin zone
+   !  write(*,*)n_qgroup
+   !  pause
+     allocate(q_group(n_qgroup,3)) 
+     q_group=0d0
+
+     t_ipc_unit_isc=matmul(e%s_lat,t_pc) ! inverse primary cell in the unit of inverse super cell 
+
+   ! write(*,*)t_ipc_unit_isc(1,:)
+   ! write(*,*)t_ipc_unit_isc(2,:)
+   ! write(*,*)t_ipc_unit_isc(3,:)
+   ! pause
+    
+     call read_super_cell_atom_positions('input.dat',r_atoms)
+     do i=1,e%n_atom_sc
+          e%r_atom_sc(i,:)=r_atoms%r_2d(i,:) 
+        !  write(*,'(4f10.5)')i,e%r_atom_sc(i,:)
+     enddo
+     !read(*,*)
+     e%r_direct_atom_sc= matmul(e%r_atom_sc, t_sc)  ! atom positions in a direct form
+
+     
+     t=matmul(e%p_lat,t_sc) ! inverse supercell lattice in the unit of inverse primary cell lattice
+     t=transpose(t)
+    ! write(*,*)'check'
+    ! write(*,*)t(1,:)
+    ! write(*,*)t(2,:)
+    ! write(*,*)t(3,:)
+    ! pause
+     
+     n1=3d0/dsqrt(dot_product(t(1,:),t(1,:)))
+     n2=3d0/dsqrt(dot_product(t(2,:),t(2,:)))
+     n3=3d0/dsqrt(dot_product(t(3,:),t(3,:)))
+         ! write(*,*) n1,n2,n3
+         ! pause
+
+     ! find the group of q points that in the first Brillouin zone of primary cell 
+     ! The total q point number is n_qgroup, the first q point is (0 0 0).
+     n_flag=1
+     do i=-n1,n1;do j=-n2,n2;do k=-n3,n3
+        t_group=i*t(1,:)+j*t(2,:)+k*t(3,:)
+        if(t_group(1).ge.-0.499 .and. t_group(1).lt.0.501 .and. t_group(2).ge.-0.499 .and. t_group(2).lt.0.501 &
+                     .and. t_group(3).ge.-0.499 .and. t_group(3).lt.0.501) then
+                if(abs(t_group(1)).gt.1e-4 .or. abs(t_group(2)).gt.1e-4 .or. abs(t_group(3)).gt.1e-4) then
+              n_flag=n_flag+1
+              ! write(*,*) t_group
+              q_group(n_flag,:)=t_group
+              ! write(*,*)q_group(n_flag,:)
+           endif
+        endif
+     enddo;enddo;enddo
+    ! write(*,*) n_flag
+    ! read(*,*) 
+    ! write(*,*)q_group(1,:)
+    ! write(*,*)q_group(2,:)
+    ! pause
+    
+
+     q_group=matmul(matmul(q_group,transpose(t_pc)),transpose(e%s_lat)) ! in the unit of inverse supercell lattice vectors 
+
+        ! q_group=matmul(q_group,transpose(t_pc))
+        ! q_group=matmul(q_group,transpose(e%s_lat))
+        ! write(*,*)q_group(1,:)
+    ! write(*,*)q_group(2,:)
+    ! pause
+
+t=transpose(t_sc)
+tt_pc=transpose(t_pc)
+!do i_k=1, e%n_k
+i_k=1
+! do i_k=1, 1
+   write(*,*) 'q=',i_k
+!   write(*,*)'q=', e%k_s(i_k,:)
+! pause
+   q(1)=e%k_s(i_k,1)*t(1,1)+e%k_s(i_k,2)*t(1,2)+e%k_s(i_k,3)*t(1,3)
+   q(2)=e%k_s(i_k,1)*t(2,1)+e%k_s(i_k,2)*t(2,2)+e%k_s(i_k,3)*t(2,3)
+   q(3)=e%k_s(i_k,1)*t(3,1)+e%k_s(i_k,2)*t(3,2)+e%k_s(i_k,3)*t(3,3)
+  ! write(*,*)'q=', q
+  ! pause
+  ! prepare phase
+   phase=0d0
+   do i_a=1,e%n_atom_sc
+      t1_r=q(1)*e%r_atom_sc(i_a,1)+q(2)*e%r_atom_sc(i_a,2)+q(3)*e%r_atom_sc(i_a,3)
+      phase(i_a)=exp(-2*pi*I_imag*t1_r)
+      !write(*,*)'atom=',i_a,  phase(i_a)  
+      !write(*,'("atom=",I3, 3f8.4, "  (",2f8.4,")")') i_a, e%r_atom_sc(i_a,:),phase(i_a)
+   enddo
+   ! write(*,*) phase
+   ! pause
+
+   do i_b=1,e%n_b
+     do i=1, e%n_atom_sc    
+       ! write(*,'(6f10.5)')e%c(i_k,i_b,i,1)*phase(i), e%c(i_k,i_b,i,2)*phase(i), e%c(i_k,i_b,i,3)*phase(i)
+        e%c(i_k,i_b,i,1)=e%c(i_k,i_b,i,1)*phase(i)
+        e%c(i_k,i_b,i,2)=e%c(i_k,i_b,i,2)*phase(i)
+        e%c(i_k,i_b,i,3)=e%c(i_k,i_b,i,3)*phase(i)
+     enddo 
+     ! pause
+     t_r=0d0;  t1_r=0d0
+     do i=-max_nx, max_nx; do j=-max_ny, max_ny; do k=-max_nz, max_nz
+     ! do i=-1, 1; do j=-1, 1; do k=0, 0
+         
+         ! write(*,*) t_pc(1,:)
+         ! write(*,*) t_pc(2,:)
+         ! write(*,*) t_pc(3,:)
+         ! pause
+        ikx=i*tt_pc(1,1)+j*tt_pc(2,1)+k*tt_pc(3,1)
+        iky=i*tt_pc(1,2)+j*tt_pc(2,2)+k*tt_pc(3,2)
+        ikz=i*tt_pc(1,3)+j*tt_pc(2,3)+k*tt_pc(3,3)
+        
+              !  write(*,*)
+        do ii=1,e%n_atom_sc
+                     phase_temp(ii)=exp(-I_imag*2*pi*(ikx*e%r_atom_sc(ii,1)+iky*e%r_atom_sc(ii,2)+ikz*e%r_atom_sc(ii,3)))
+                    ! write(*,*)phase_temp(ii)
+                    ! pause
+                  !  write(*,*)e%r_atom_sc(ii,:)
+        enddo
+           ! write(*,*)
+           ! write(*,*) i,j,k
+           ! write(*,*)ikx, iky, ikz
+           ! write(*,*) phase_temp(:)
+           ! pause
+
+       do jj=1,3
+          t_c=0d0
+          do ii=1,e%n_atom_sc
+
+             t_c=t_c+e%c(i_k,i_b,ii,jj)*phase_temp(ii)
+             !write(*,'(4f8.4)')e%c(i_k,i_b,ii,jj), phase_temp(ii)
+          enddo
+        !  write(*,*)'adds to ', abs(dble(t_c))
+        !  pause
+         
+         t_r=t_r+abs(dble(t_c))
+        enddo
+        !write(*,*) q_group(1,:)
+        !read(*,*)
+        
+    do kk=2,n_qgroup
+         ! write(*,*)'q_group',kk
+          ikx=i*tt_pc(1,1)+j*tt_pc(2,1)+k*tt_pc(3,1)+q_group(kk,1)*t(1,1)+q_group(kk,2)*t(2,1)+q_group(kk,3)*t(3,1)
+          iky=i*tt_pc(1,2)+j*tt_pc(2,2)+k*tt_pc(3,2)+q_group(kk,1)*t(1,2)+q_group(kk,2)*t(2,2)+q_group(kk,3)*t(3,2)
+          ikz=i*tt_pc(1,3)+j*tt_pc(2,3)+k*tt_pc(3,3)+q_group(kk,1)*t(1,3)+q_group(kk,2)*t(2,3)+q_group(kk,3)*t(3,3)
+          do ii=1,e%n_atom_sc
+                       phase_temp(ii)=exp(-I_imag*2*pi*(ikx*e%r_atom_sc(ii,1)+iky*e%r_atom_sc(ii,2)+ikz*e%r_atom_sc(ii,3)))
+          enddo
+
+          do jj=1,3
+          t1_c=0d0
+          do ii=1,e%n_atom_sc
+             t1_c=t1_c+e%c(i_k,i_b,ii,jj)*phase_temp(ii)
+            ! write(*,'(4f8.4)')e%c(i_k,i_b,ii,jj), phase_temp(ii)
+          enddo
+         ! write(*,*)'adds to ', abs(dble(t1_c))
+          !pause
+          t1_r=t1_r+abs(dble(t1_c))
+          enddo
+        enddo
+        !pause
+     enddo;enddo;enddo
+
+       ! write(*,'(2I5,f20.5)')i_k, i_b, t_r/(t_r+t1_r)
+    ! pause
+
+     e%e(i_k,i_b,2)=t_r/(t_r+t1_r)
+   enddo
+ 
+! enddo
+
+wtclean=read_real('input.dat','wtclean',0.0d0)
+
+open(2,file='unfold.dat')
+i_k=1
+do i_b=1,e%n_b !; do i_k=1,e%n_k
+   !if (e%e(i_k,i_b,2) .gt. wtclean) then
+      write(2,'(3f18.10)') e%klength(i_k),e%e(i_k,i_b,1),e%e(i_k,i_b,2)
+   !endif
+enddo
+  ! write(2,*)
+!enddo
+close(2)
+
+endsubroutine Unfold_Phonon_planewave_abinitgamma
+
+
+
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!  subroutine: Unfolding phonon dispersion
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+subroutine Unfold_Phonon_gamma(e)
+implicit none
+type(pebu) :: e
+type(array_car) cell1_read,  cell2_read, r_atoms
+type(list):: L
+integer :: i, j, k
+integer :: i_k, i_b, i_a
+complex(kind=8), allocatable :: proj(:,:,:)
+complex(kind=8) ::  t1_c
+real(kind=8), allocatable :: t(:,:)
+real(kind=8) :: q(3)
+real(kind=8):: t_r, t1_r
+complex(kind=8), allocatable :: phase(:)
+integer :: ipiv(3)
+
+allocate(t(3,3))
+
+! read atom position
+     call read_super_cell_atom_positions('input.dat',r_atoms)
+     e%n_atom_sc=r_atoms%N1
+     if(.not.allocated(e%r_atom_sc)) allocate(e%r_atom_sc(e%n_atom_sc,3))
+     allocate(phase(e%n_atom_sc))
+     do i=1,e%n_atom_sc
+          e%r_atom_sc(i,:)=r_atoms%r_2d(i,:) 
+     enddo
+
+     call read_atom_correspondence('input.dat',L)
+     
+     call read_primary_cell('input.dat',cell1_read)
+     e%p_lat(1,:)=cell1_read%r_2d(1,:)
+     e%p_lat(2,:)=cell1_read%r_2d(2,:)
+     e%p_lat(3,:)=cell1_read%r_2d(3,:)
+     
+     call read_super_cell('input.dat',cell2_read)
+     e%s_lat(1,:)=cell2_read%r_2d(1,:)
+     e%s_lat(2,:)=cell2_read%r_2d(2,:)
+     e%s_lat(3,:)=cell2_read%r_2d(3,:)
+
+
+     t=dble(e%s_lat)   
+     call inv_d(t,t)  ! inverse matrix
+
+
+allocate(proj(L%N1 *3, e%n_atom_sc,3))
+proj=0d0
+do i=1, L%N1;  do j=1,3
+   do k=1, L%f(i)
+      write(*,*) i, j, e%n_atom_sc, (i-1)*3+j, L%n(i,k)
+      proj((i-1)*3+j, L%n(i,k),j)=1.0d0/sqrt(dble(L%f(i)))
+   enddo
+enddo;enddo
+pause
+
+do i_k=1, 1 ! e%n_k
+  write(*,*) 'q=',i_k
+!!  q(1)=e%k_s(i_k,1)*t(1,1)+e%k_s(i_k,2)*t(1,2)+e%k_s(i_k,3)*t(1,3)
+!!  q(2)=e%k_s(i_k,1)*t(2,1)+e%k_s(i_k,2)*t(2,2)+e%k_s(i_k,3)*t(2,3)
+!!  q(3)=e%k_s(i_k,1)*t(3,1)+e%k_s(i_k,2)*t(3,2)+e%k_s(i_k,3)*t(3,3)
+   q=0d0
+  ! prepare phase
+  !write(*,*)q
+  !read(*,*)
+  phase=0d0
+  do i_a=1,e%n_atom_sc
+     t1_r=q(1)*e%r_atom_sc(i_a,1)+q(2)*e%r_atom_sc(i_a,2)+q(3)*e%r_atom_sc(i_a,3)
+     phase(i_a)=exp(-2*pi*I_imag*t1_r)
+     !write(*,*)'atom=',i_a,  phase(i_a)  
+  enddo
+!pause
+   
+
+  do i_b=1,e%n_b
+!   t_r=0d0
+!   do i=1,6
+ !     t1_c=0d0
+!	  do j=1,e%n_atom_sc
+!          t1_c=t1_c+phase(j)*(proj(i,j,1)*e%c(i_k,i_b,j,1)+proj(i,j,2)*e%c(i_k,i_b,j,2)+proj(i,j,3)*e%c(i_k,i_b,j,3))
+!	  enddo
+!	  t_r=t_r+dble(t1_c*conjg(t1_c))
+ !  enddo
+ !  e%e(i_k,i_b,2)=sqrt(t_r)
+  !write(*,*)
+  !write(*,*) 'q=',i_k, 'band=', i_b
+  do i=1, e%n_atom_sc    
+     !write(*,'(6f10.5)')e%c(i_k,i_b,i,1)*phase(i), e%c(i_k,i_b,i,2)*phase(i), e%c(i_k,i_b,i,3)*phase(i)
+     e%c(i_k,i_b,i,1)=e%c(i_k,i_b,i,1)*phase(i)
+     e%c(i_k,i_b,i,2)=e%c(i_k,i_b,i,2)*phase(i)
+     e%c(i_k,i_b,i,3)=e%c(i_k,i_b,i,3)*phase(i)
+  enddo 
+
+   t_r=0d0
+   do i=1,6
+      t1_c=0d0
+	  do j=1,e%n_atom_sc
+              t1_c=t1_c+(proj(i,j,1)*e%c(i_k,i_b,j,1)+proj(i,j,2)*e%c(i_k,i_b,j,2)+proj(i,j,3)*e%c(i_k,i_b,j,3))
+	  enddo
+	  t_r=t_r+dble(t1_c*conjg(t1_c))
+   enddo
+   e%e(i_k,i_b,2)=sqrt(t_r)
+
+
+  !pause
+enddo;enddo
+
+open(2,file='unfold.dat')
+do i_b=1,e%n_b; do i_k=1,e%n_k
+   write(2,'(3f18.10)') e%klength(i_k),e%e(i_k,i_b,1),e%e(i_k,i_b,2)
+enddo
+  ! write(2,*)
+enddo
+close(2)
+
+endsubroutine Unfold_Phonon_gamma
+
+
+
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!  subroutine: Unfolding phonon dispersion
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+subroutine Unfold_Phonon_abinit(e)
+implicit none
+type(pebu) :: e
+type(array_car) cell1_read,  cell2_read, r_atoms
+type(list):: L
+integer :: i, j, k
+integer :: i_k, i_b, i_a
+complex(kind=8), allocatable :: proj(:,:,:)
+complex(kind=8) ::  t1_c
+real(kind=8), allocatable :: t(:,:)
+real(kind=8) :: q(3)
+real(kind=8):: t_r, t1_r
+complex(kind=8), allocatable :: phase(:)
+integer :: ipiv(3)
+
+allocate(t(3,3))
+
+! read atom position
+     call read_super_cell_atom_positions('input.dat',r_atoms)
+     e%n_atom_sc=r_atoms%N1
+     if(.not.allocated(e%r_atom_sc)) allocate(e%r_atom_sc(e%n_atom_sc,3))
+     allocate(phase(e%n_atom_sc))
+     do i=1,e%n_atom_sc
+          e%r_atom_sc(i,:)=r_atoms%r_2d(i,:) 
+     enddo
+
+     call read_atom_correspondence('input.dat',L)
+     
+     call read_primary_cell('input.dat',cell1_read)
+     e%p_lat(1,:)=cell1_read%r_2d(1,:)
+     e%p_lat(2,:)=cell1_read%r_2d(2,:)
+     e%p_lat(3,:)=cell1_read%r_2d(3,:)
+     
+     call read_super_cell('input.dat',cell2_read)
+     e%s_lat(1,:)=cell2_read%r_2d(1,:)
+     e%s_lat(2,:)=cell2_read%r_2d(2,:)
+     e%s_lat(3,:)=cell2_read%r_2d(3,:)
+
+
+     t=dble(e%s_lat)   
+     call inv_d(t,t)  ! inverse matrix
+
+
+allocate(proj(L%N1 *3, e%n_atom_sc,3))
+proj=0d0
+do i=1, L%N1;  do j=1,3
+   do k=1, L%f(i)
+     ! write(*,*) i, j, e%n_atom_sc, (i-1)*3+j, L%n(i,k)
+      proj((i-1)*3+j, L%n(i,k),j)=1.0d0/sqrt(dble(L%f(i)))
+   enddo
+enddo;enddo
+!pause
+
+do i_k=1,  e%n_k
+  write(*,*) 'q=',i_k
+!!  q(1)=e%k_s(i_k,1)*t(1,1)+e%k_s(i_k,2)*t(1,2)+e%k_s(i_k,3)*t(1,3)
+!!  q(2)=e%k_s(i_k,1)*t(2,1)+e%k_s(i_k,2)*t(2,2)+e%k_s(i_k,3)*t(2,3)
+!!  q(3)=e%k_s(i_k,1)*t(3,1)+e%k_s(i_k,2)*t(3,2)+e%k_s(i_k,3)*t(3,3)
+   q=0d0
+  ! prepare phase
+  !write(*,*)q
+  !read(*,*)
+  phase=0d0
+  do i_a=1,e%n_atom_sc
+     t1_r=q(1)*e%r_atom_sc(i_a,1)+q(2)*e%r_atom_sc(i_a,2)+q(3)*e%r_atom_sc(i_a,3)
+     phase(i_a)=exp(-2*pi*I_imag*t1_r)
+     !write(*,*)'atom=',i_a,  phase(i_a)  
+  enddo
+!pause
+   
+
+  do i_b=1,e%n_b
+!   t_r=0d0
+!   do i=1,6
+ !     t1_c=0d0
+!	  do j=1,e%n_atom_sc
+!          t1_c=t1_c+phase(j)*(proj(i,j,1)*e%c(i_k,i_b,j,1)+proj(i,j,2)*e%c(i_k,i_b,j,2)+proj(i,j,3)*e%c(i_k,i_b,j,3))
+!	  enddo
+!	  t_r=t_r+dble(t1_c*conjg(t1_c))
+ !  enddo
+ !  e%e(i_k,i_b,2)=sqrt(t_r)
+  !write(*,*)
+  !write(*,*) 'q=',i_k, 'band=', i_b
+  do i=1, e%n_atom_sc    
+     !write(*,'(6f10.5)')e%c(i_k,i_b,i,1)*phase(i), e%c(i_k,i_b,i,2)*phase(i), e%c(i_k,i_b,i,3)*phase(i)
+     e%c(i_k,i_b,i,1)=e%c(i_k,i_b,i,1)*phase(i)
+     e%c(i_k,i_b,i,2)=e%c(i_k,i_b,i,2)*phase(i)
+     e%c(i_k,i_b,i,3)=e%c(i_k,i_b,i,3)*phase(i)
+  enddo 
+
+   t_r=0d0
+   do i=1,6
+      t1_c=0d0
+	  do j=1,e%n_atom_sc
+              t1_c=t1_c+(proj(i,j,1)*e%c(i_k,i_b,j,1)+proj(i,j,2)*e%c(i_k,i_b,j,2)+proj(i,j,3)*e%c(i_k,i_b,j,3))
+	  enddo
+	  t_r=t_r+dble(t1_c*conjg(t1_c))
+   enddo
+   e%e(i_k,i_b,2)=sqrt(t_r)
+
+
+  !pause
+enddo;enddo
+
+open(2,file='unfold.dat')
+do i_b=1,e%n_b; do i_k=1,e%n_k
+   write(2,'(3f18.10)') e%klength(i_k),e%e(i_k,i_b,1),e%e(i_k,i_b,2)
+enddo
+   write(2,*)
+enddo
+close(2)
+
+endsubroutine Unfold_Phonon_abinit
+
 
 
 
